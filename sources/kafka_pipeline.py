@@ -7,9 +7,9 @@ from dlt.common.pipeline import LoadInfo
 
 # As this pipeline can be run as standalone script or as part of the tests, we need to handle the import differently.
 try:
-    from .kafka_dlt import kafka_source, kafka_topic  # type: ignore
+    from .kafka_dlt import kafka_source  # type: ignore
 except ImportError:
-    from kafka_dlt import kafka_source, kafka_topic
+    from kafka_dlt import kafka_source
 
 
 def load_select_topics() -> None:
@@ -69,7 +69,7 @@ def load_kafka() -> LoadInfo:
     """Use the kafka source to completely load all collection in a database"""
 
     # By default the kafka source reflects all collections in the database
-    source = kafka_source()
+    source = kafka_source(group_id="PythonProducer")
 
     values = list(source)
     values

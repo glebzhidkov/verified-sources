@@ -4,71 +4,94 @@ from typing import Any, Iterable, Optional
 
 from pendulum import DateTime
 import dlt
+import json
 from dlt.extract.source import DltResource
 from dlt.common.time import ensure_pendulum_datetime
+from dlt.common.utils import digest128
 
-from kafka import TopicPartition, KafkaConsumer
-from .helpers import consumer_from_credentials
+from .helpers import consumer_from_credentials, KafkaSourceConfiguration
+from confluent_kafka import Consumer, TopicPartition, OFFSET_BEGINNING
+from confluent_kafka.admin._metadata import TopicMetadata
 
 
-@dlt.source(name="kafka")
+@dlt.source(name="kafka", spec=KafkaSourceConfiguration)
 def kafka_source(
     bootstrap_servers: str = dlt.secrets.value,
     group_id: Optional[str] = dlt.config.value,
+    sasl_mechanisms: Optional[str] = dlt.config.value,
+    security_protocol: Optional[str] = dlt.config.value,
+    sasl_username: Optional[str] = dlt.config.value,
+    sasl_password: Optional[str] = dlt.config.value,
 ) -> Iterable[DltResource]:
     """
     A DLT source which loads data from a kafka database using python kafka."""
 
     # set up kafka client
     consumer = consumer_from_credentials(
-        group_id=group_id,
         bootstrap_servers=bootstrap_servers,
+        group_id=group_id,
+        sasl_mechanisms=sasl_mechanisms,
+        security_protocol=security_protocol,
+        sasl_username=sasl_username,
+        sasl_password=sasl_password,
     )
 
-    for topic in consumer.topics():
+    topic_list = consumer.list_topics()
+    for topic_name, partitions in topic_list.topics.items():
         yield dlt.resource(  # type: ignore
             get_topic_messages,
-            name=topic,
-        )(consumer, topic)
-
-
-@dlt.common.configuration.with_config(sections=("sources", "kafka"))
-def kafka_topic(
-    bootstrap_servers: str = dlt.secrets.value,
-    group_id: Optional[str] = dlt.config.value,
-    topic: str = dlt.config.value,
-) -> Any:
-    """
-    A DLT source which loads a collection from a kafka database using python-kafka."""
-    yield from get_topic_messages(
-        bootstrap_servers,
-        group_id,
-        topic,
-    )
+            name=topic_name,
+        )(consumer, topic_name, partitions)
 
 
 def get_topic_messages(
-    consumer: KafkaConsumer,
+    consumer: Consumer,
     topic: str,
+    partitions: TopicMetadata,
+    parse_json: bool = False,
     incremental: Optional[dlt.sources.incremental[DateTime]] = None,
 ) -> Iterable[dict]:
     """Get all documents from a kafka topic."""
+
+    if incremental is None:
+        time_ago = OFFSET_BEGINNING
+    else:
+        time_ago = incremental.last_value
+    
     topic_partitions = []
-    for partition_id in consumer.partitions_for_topic(topic):
-        topic_partitions.append(TopicPartition(topic, partition_id))
+    for topic_partition in partitions.partitions:
+        topic_partitions.append(TopicPartition(topic, topic_partition, offset=time_ago))
+
     consumer.assign(topic_partitions)
-    for topic_partition in topic_partitions:
-        if incremental:
-            last_value = incremental.last_value
-            consumer.seek(topic_partition, last_value)
-        consumer.seek_to_beginning(topic_partition)
-        if consumer._closed:
-            consumer
-        for message in consumer:
-            if consumer._closed:
-                consumer
-            message_dict = message._asdict()
-            message_dict["timestamp"] = ensure_pendulum_datetime(
-                message_dict["timestamp"] / 1000
-            )
-            yield message_dict
+    last_offsets = {t.partition: consumer.get_watermark_offsets(t)[1] for t in topic_partitions}
+    # Consume the messages
+    while True:
+        response = consumer.consume(num_messages=1000, timeout=5)
+        if response:
+            records = []
+            for record in response:
+                offset = record.offset()
+                content = record.value()
+                ts_rec = record.timestamp()
+                # if timestamp is not available, set it to None
+                timestamp = ts_rec[1] if ts_rec[0] else None
+                message = {
+                    "_kinesis": {
+                        "partition_id": record.partition(),
+                        "offset": offset,
+                        "ts": timestamp,
+                        "partition": record["PartitionKey"],
+                        "topic_name": topic,
+                    },
+                    "_kinesis_msg_id": digest128(topic + offset),
+                }
+                if parse_json:
+                    message.update(json.loadb(content))
+                else:
+                    message["data"] = content
+                records.append(message)
+            yield records
+
+        positions = consumer.position(topic_partitions)
+        if all(p.offset >= last_offsets[p.partition] for p in positions):
+            break
