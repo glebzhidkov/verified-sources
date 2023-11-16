@@ -8,20 +8,34 @@ import json
 from dlt.extract.source import DltResource
 from dlt.common.time import ensure_pendulum_datetime
 from dlt.common.utils import digest128
+from dlt.common.typing import TDataItem, StrStr,
 
 from .helpers import consumer_from_credentials, KafkaSourceConfiguration
 from confluent_kafka import Consumer, TopicPartition, OFFSET_BEGINNING
 from confluent_kafka.admin._metadata import TopicMetadata
 
 
-@dlt.source(name="kafka", spec=KafkaSourceConfiguration)
-def kafka_source(
+@dlt.resource(
+        name=lambda args: args["group_id"],
+        primary_key="_kafka_msg_id",
+        standalone=True,
+        # spec=KafkaSourceConfiguration
+        )
+def kafka_stream(
     bootstrap_servers: str = dlt.secrets.value,
     group_id: Optional[str] = dlt.config.value,
     sasl_mechanisms: Optional[str] = dlt.config.value,
     security_protocol: Optional[str] = dlt.config.value,
     sasl_username: Optional[str] = dlt.config.value,
     sasl_password: Optional[str] = dlt.config.value,
+    last_msg: Optional[dlt.sources.incremental[StrStr]] = dlt.sources.incremental(
+        "_kinesis", last_value_func=max_sequence_by_shard
+    ),
+    initial_at_timestamp: TAnyDateTime = 0.0,
+    max_number_of_messages: int = None,
+    milliseconds_behind_latest: int = 1000,
+    parse_json: bool = True,
+    chunk_size: int = 1000,
 ) -> Iterable[DltResource]:
     """
     A DLT source which loads data from a kafka database using python kafka."""
@@ -76,14 +90,14 @@ def get_topic_messages(
                 # if timestamp is not available, set it to None
                 timestamp = ts_rec[1] if ts_rec[0] else None
                 message = {
-                    "_kinesis": {
+                    "_kafka": {
                         "partition_id": record.partition(),
                         "offset": offset,
                         "ts": timestamp,
                         "partition": record["PartitionKey"],
                         "topic_name": topic,
                     },
-                    "_kinesis_msg_id": digest128(topic + offset),
+                    "_kafka_msg_id": digest128(topic + offset),
                 }
                 if parse_json:
                     message.update(json.loadb(content))
