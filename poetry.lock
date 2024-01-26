@@ -4283,6 +4283,27 @@ pytest = ">=5.0"
 dev = ["pre-commit", "pytest-asyncio", "tox"]
 
 [[package]]
+name = "pytest-twisted"
+version = "1.14.0"
+description = "A twisted plugin for pytest."
+optional = false
+python-versions = ">=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*"
+files = [
+    {file = "pytest-twisted-1.14.0.tar.gz", hash = "sha256:209bf5a6452cfbfb61de8f015902c14ec8126400911507074bb2ee4ce8dfe313"},
+    {file = "pytest_twisted-1.14.0-py2.py3-none-any.whl", hash = "sha256:1b63b73182bd1b995f30826a1d870c9ac0d08244ab0c871eb8bd0c8243acfb3d"},
+]
+
+[package.dependencies]
+decorator = "*"
+greenlet = "*"
+pytest = ">=2.3"
+
+[package.extras]
+dev = ["black", "pre-commit"]
+pyqt5 = ["qt5reactor[pyqt5] (>=0.6.2)"]
+pyside2 = ["qt5reactor[pyside2] (>=0.6.3)"]
+
+[[package]]
 name = "python-dateutil"
 version = "2.8.2"
 description = "Extensions to the standard Python datetime module"
@@ -6210,4 +6231,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8.1"
-content-hash = "b0c7f5b2461eb3bc8a6c76b71e3d71db7838643b05d63d3a24a644371f3235ed"
+content-hash = "5091c0e7c2385fa7fa09c48bb5caebf6bed37af681af86f789765905c9a5e322"
